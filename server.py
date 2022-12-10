@@ -7,6 +7,7 @@ import flax.linen as nn
 import optax
 from optax import Params
 import jaxopt
+from tqdm import tqdm
 
 from client import Client
 
@@ -29,16 +30,18 @@ class Server:
         maxiter: int = 5,
         seed: Optional[int] = None
     ):
+        self.model = model
         self.params = params
         self.clients = clients
         self.maxiter = maxiter
         self.rng = np.random.default_rng(seed)
-        self.sleep_solver = jaxopt.OptaxSolver(opt=optax.sgd(0.01), fun=l2loss(model), maxiter=5)
+        self.grad_lambda = jax.tree_map(jnp.zeros_like, params)
+        self.X, self.Y = [], []
 
     def init_state(self, params: Params) -> State:
-        return State(np.inf)
+        return State(0, np.inf)
 
-    def update(self, params: Params, state: State) -> Tuple[Params, State]:
+    def update(self, params: Params, server_state: State) -> Tuple[Params, State]:
         all_grads, all_states = [], []
         for c in self.clients:
             grads, state = c.update(params)
@@ -46,33 +49,25 @@ class Server:
             all_states.append(state)
         meaned_grads = tree_mean(*all_grads)
         params = tree_add_scalar_mul(params, -1, meaned_grads)
-#        round_val = state.round + 1
-#        if round_val % 5 == 0:
-#            params = self.sleep(params)
-        return params, State(np.mean([s.value for s in all_states]))
+        round_val = server_state.round + 1
+        self.grad_lambda = new_lambda(self.grad_lambda, meaned_grads, round_val)
+        if round_val % 5 == 0:
+            params = self.sleep(params)
+        return params, State(round_val, np.mean([s.value for s in all_states]))
 
     def sleep(self, params):
-        X = np.abs(self.rng.normal(0, 1, size=(1000, 28, 28, 1)))
+        grads = jax.tree_map(lambda l: self.rng.normal(l), self.grad_lambda)
+        params = tree_add_scalar_mul(params, -0.001, grads)
+        return params
+
 
     def change_data(self, data):
         for c, d in zip(self.clients, data):
             c.data = d
 
 
-def l2loss(model: nn.Module) -> Callable[[PyTree, Array, Array], float]:
-    """
-    l2-norm loss function
-
-    Arguments:
-    - model: Model function that performs predictions given parameters and samples
-    """
-    @jax.jit
-    def _apply(params: PyTree, X: Array, Y: Array) -> float:
-        logits = jnp.clip(model.apply(params, X), 1e-15, 1 - 1e-15)
-        one_hot = jax.nn.one_hot(Y, logits.shape[-1])
-        return jnp.mean(jnp.linalg.norm(one_hot - logits))
-    return _apply
-
+def new_lambda(grad_mew, new_grads, round_val):
+    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + g) / round_val, grad_mew, new_grads)
 
 @jax.jit
 def tree_mean(*trees: PyTree) -> PyTree:
