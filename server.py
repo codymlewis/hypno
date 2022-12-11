@@ -35,7 +35,8 @@ class Server:
         self.clients = clients
         self.maxiter = maxiter
         self.rng = np.random.default_rng(seed)
-        self.grad_lambda = jax.tree_map(jnp.zeros_like, params)
+        self.grad_mew = jax.tree_map(jnp.zeros_like, params)
+        self.grad_new = jax.tree_map(jnp.zeros_like, params)
         self.X, self.Y = [], []
 
     def init_state(self, params: Params) -> State:
@@ -50,14 +51,15 @@ class Server:
         meaned_grads = tree_mean(*all_grads)
         params = tree_add_scalar_mul(params, -1, meaned_grads)
         round_val = server_state.round + 1
-        self.grad_lambda = new_lambda(self.grad_lambda, meaned_grads, round_val)
+        self.grad_mew = new_mew(self.grad_mew, meaned_grads, round_val)
+        self.grad_new = new_new(self.grad_new, meaned_grads, round_val)
         if round_val % 5 == 0:
             params = self.sleep(params)
         return params, State(round_val, np.mean([s.value for s in all_states]))
 
     def sleep(self, params):
-        grads = jax.tree_map(lambda l: self.rng.normal(l), self.grad_lambda)
-        params = tree_add_scalar_mul(params, -0.001, grads)
+        grads = jax.tree_map(lambda m, n: self.rng.normal(m, jnp.sqrt(n - m**2)), self.grad_mew, self.grad_new)
+        params = tree_add_scalar_mul(params, -0.1, grads)
         return params
 
 
@@ -66,8 +68,12 @@ class Server:
             c.data = d
 
 
-def new_lambda(grad_mew, new_grads, round_val):
+def new_mew(grad_mew, new_grads, round_val):
     return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + g) / round_val, grad_mew, new_grads)
+
+
+def new_new(grad_new, new_grads, round_val):
+    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + g**2) / round_val, grad_new, new_grads)
 
 @jax.jit
 def tree_mean(*trees: PyTree) -> PyTree:
