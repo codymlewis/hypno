@@ -109,30 +109,19 @@ if __name__ == "__main__":
 
     dataset = load_dataset(seed)
     blocks = np.split(np.arange(dataset.classes), 2)
-    data = dataset.fed_split([batch_size for _ in range(num_clients)], partial(datalib.block_lda, block=blocks[0]))
     model = LeNet()
     params = model.init(jax.random.PRNGKey(seed), dataset.input_init)
-    clients = [Client(params, optax.sgd(0.1), celoss(model), d) for d in data]
+    clients = [Client(params, optax.sgd(0.1), celoss(model)) for _ in range(num_clients)]
     server = Server(model, params, clients, maxiter=rounds, seed=seed)
     state = server.init_state(params)
 
-    for _ in (pbar := trange(server.maxiter)):
-        params, state = server.update(params, state)
-        pbar.set_postfix_str(f"LOSS: {state.value:.3f}")
+    for block in blocks:
+        data = dataset.fed_split([batch_size for _ in range(num_clients)], partial(datalib.block_lda, block=block))
+        server.change_block(data)
+        for _ in (pbar := trange(server.maxiter)):
+            params, state = server.update(params, state)
+            pbar.set_postfix_str(f"LOSS: {state.value:.3f}")
 
-    test_data = dataset.get_test_iter(batch_size)
-    sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
-    plt.show()
-
-    data = dataset.fed_split([batch_size for _ in range(num_clients)], partial(datalib.block_lda, block=blocks[1]))
-    server.change_data(data)
-
-    for _ in (pbar := trange(server.maxiter)):
-        params, state = server.update(params, state)
-        pbar.set_postfix_str(f"LOSS: {state.value:.3f}")
-
-    test_data = dataset.get_test_iter(batch_size)
-    print(f"Final accuracy: {accuracy(model, params, test_data):.3%}")
-    test_data = dataset.get_test_iter(batch_size)
-    sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
-    plt.show()
+        test_data = dataset.get_test_iter(batch_size)
+        sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
+        plt.show()

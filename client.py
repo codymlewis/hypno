@@ -1,4 +1,4 @@
-from typing import Callable, Generator, Tuple, NamedTuple
+from typing import Callable, Tuple, NamedTuple
 import jax
 from jax import Array
 import jaxopt
@@ -11,13 +11,12 @@ class Client:
         params: Params,
         opt: GradientTransformation,
         loss_fun: Callable[[Params, Array, Array], float],
-        data: Generator,
         maxiter: int = 1
     ):
         self.solver = jaxopt.OptaxSolver(opt=opt, fun=loss_fun, maxiter=maxiter)
         self.state = self.solver.init_state(params)
         self.step = jax.jit(self.solver.update)
-        self.data = data
+        self.data = None
 
     def update(self, global_params: Params) -> Tuple[Updates, NamedTuple]:
         params = global_params
