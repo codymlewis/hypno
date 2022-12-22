@@ -1,3 +1,4 @@
+from argparse import ArgumentParser
 from functools import partial
 from typing import Any, Callable, Iterable, Tuple
 import einops
@@ -101,31 +102,37 @@ def load_dataset(seed: int):
 
 
 if __name__ == "__main__":
+    # Fix cycling through blocks in the server
     sns.set_theme()
-    seed = 42
-    batch_size = 32
-    num_clients = 10
-    rounds = 500
+    parser = ArgumentParser(description="Test the effects of catastrophic forgetting.")
+    parser.add_argument('-n', '--num-clients', type=int, default=10, help="Number of clients for the simulation")
+    parser.add_argument('-s', '--seed', type=int, default=42, help="Seed for the simulation")
+    parser.add_argument('-b', '--blocks', type=int, default=2, help="Number of blocks for the simulation")
+    parser.add_argument('-c', '--cycles', type=int, default=1, help="Number of cycles for the simulation")
+    parser.add_argument('-r', '--rounds', type=int, default=500, help="Rounds per block for the simulation")
+    parser.add_argument('--batch-size', type=int, default=32, help="Minibatch size for the simulation")
+    args = parser.parse_args()
 
-    dataset = load_dataset(seed)
-    blocks = np.split(np.arange(dataset.classes), 2)
+    dataset = load_dataset(args.seed)
+    blocks = np.split(np.arange(dataset.classes), args.blocks)
     model = LeNet()
-    params = model.init(jax.random.PRNGKey(seed), dataset.input_init)
-    clients = [Client(params, optax.sgd(0.1), celoss(model)) for _ in range(num_clients)]
-    server = Server(model, params, clients, maxiter=rounds, seed=seed)
+    params = model.init(jax.random.PRNGKey(args.seed), dataset.input_init)
+    clients = [Client(params, optax.sgd(0.1), celoss(model)) for _ in range(args.num_clients)]
+    server = Server(model, params, clients, maxiter=args.rounds, seed=args.seed)
     state = server.init_state(params)
 
-    for block in blocks:
-        data = dataset.fed_split(
-            [batch_size for _ in range(num_clients)],
-            partial(datalib.block_lda, block=block, alpha=1.0)
-        )
-        server.change_block(data)
-        for _ in (pbar := trange(server.maxiter)):
-            params, state = server.update(params, state)
-            pbar.set_postfix_str(f"LOSS: {state.value:.3f}")
+    for c in range(args.cycles):
+        for block in blocks:
+            data = dataset.fed_split(
+                [args.batch_size for _ in range(args.num_clients)],
+                partial(datalib.block_lda, block=block, alpha=1.0)
+            )
+            server.change_block(data)
+            for _ in (pbar := trange(server.maxiter)):
+                params, state = server.update(params, state)
+                pbar.set_postfix_str(f"LOSS: {state.value:.3f}")
 
-        test_data = dataset.get_test_iter(batch_size)
-        print(confusion_matrix(model, params, test_data))
-        #sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
-        #plt.show()
+            test_data = dataset.get_test_iter(args.batch_size)
+            print(confusion_matrix(model, params, test_data))
+            #sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
+            #plt.show()

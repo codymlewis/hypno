@@ -22,12 +22,14 @@ class Server:
         params: Params,
         clients: Iterable[Client],
         maxiter: int = 5,
+        lr: float = 0.1,
         seed: Optional[int] = None
     ):
         self.model = model
         self.params = params
         self.clients = clients
         self.maxiter = maxiter
+        self.lr = lr
         self.rng = np.random.default_rng(seed)
         self.grad_mew = []
         self.grad_new = []
@@ -54,8 +56,7 @@ class Server:
     def sleep(self, meaned_grads):
         z_grads = []
         for mew, new in zip(self.grad_mew[:-1], self.grad_new[:-1]):
-            # TODO: Is 10 the number of clients or the inverse of the learning rate?
-            grads = jax.tree_map(lambda m, n: 10 * self.rng.normal(m, jnp.sqrt(n - m**2)), mew, new)
+            grads = jax.tree_map(lambda m, n: (1 / self.lr) * self.rng.normal(m, jnp.sqrt(n - m**2)), mew, new)
             z_grads.append(grads)
         return tree_mean(meaned_grads, *z_grads)
 
