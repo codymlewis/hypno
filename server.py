@@ -2,6 +2,7 @@ from typing import Iterable, Optional, NamedTuple, Tuple
 import numpy as np
 import jax
 import jax.numpy as jnp
+from jax import Array
 import flax.linen as nn
 from optax import Params
 
@@ -22,18 +23,23 @@ class Server:
         params: Params,
         clients: Iterable[Client],
         maxiter: int = 5,
-        lr: float = 0.1,
+        sleep_weighting: float = 2.0,
+        total_blocks: int = 2,
         seed: Optional[int] = None
     ):
         self.model = model
         self.params = params
         self.clients = clients
         self.maxiter = maxiter
-        self.lr = lr
         self.rng = np.random.default_rng(seed)
-        self.grad_mew = []
-        self.grad_new = []
-        self.X, self.Y = [], []
+        self.grad_mew = [jax.tree_map(jnp.zeros_like, params) for _ in range(total_blocks)]
+        self.grad_new = [jax.tree_map(jnp.zeros_like, params) for _ in range(total_blocks)]
+        self.times_updated = [1 for _ in range(total_blocks)]
+        self.block_sizes = np.array([0 for _ in range(total_blocks)])
+        self.sleep_weighting = sleep_weighting
+        self.current_block = -1
+        self.total_blocks = total_blocks
+        self.block_changes = -1
 
     def init_state(self, params: Params) -> State:
         return State(0, np.inf)
@@ -46,39 +52,60 @@ class Server:
             all_states.append(state)
         meaned_grads = tree_mean(*all_grads)
         round_val = server_state.round + 1
-        self.grad_mew[-1] = update_mew(self.grad_mew[-1], meaned_grads, round_val)
-        self.grad_new[-1] = update_new(self.grad_new[-1], meaned_grads, round_val)
-        if len(self.grad_mew) > 1:
+        self.grad_mew[self.current_block] = update_mew(
+            self.grad_mew[self.current_block],
+            meaned_grads,
+            self.times_updated[self.current_block],
+            self.sleep_weighting
+        )
+        self.grad_new[self.current_block] = update_new(
+            self.grad_new[self.current_block],
+            meaned_grads,
+            self.times_updated[self.current_block],
+            self.sleep_weighting
+        )
+        self.times_updated[self.current_block] += 1
+        if self.block_changes:
             meaned_grads = self.sleep(meaned_grads)
         params = tree_add_scalar_mul(params, -1, meaned_grads)
         return params, State(round_val, np.mean([s.value for s in all_states]))
 
     def sleep(self, meaned_grads):
         z_grads = []
-        for mew, new in zip(self.grad_mew[:-1], self.grad_new[:-1]):
-            grads = jax.tree_map(lambda m, n: (1 / self.lr) * self.rng.normal(m, jnp.sqrt(n - m**2)), mew, new)
-            z_grads.append(grads)
-        return tree_mean(meaned_grads, *z_grads)
+        for i, (mew, new) in enumerate(zip(self.grad_mew, self.grad_new)):
+            if i != self.current_block and i <= self.block_changes:
+                grads = jax.tree_map(lambda m, n: self.rng.normal(m, jnp.sqrt(n - m**2)), mew, new)
+                z_grads.append(grads)
+        return tree_average(meaned_grads, *z_grads, weightings=self.block_sizes / self.block_sizes.sum())
 
     def change_block(self, data):
+        block_size = 0
         for c, d in zip(self.clients, data):
             c.data = d
-        self.grad_mew.append(jax.tree_map(jnp.zeros_like, self.params))
-        self.grad_new.append(jax.tree_map(jnp.zeros_like, self.params))
+            block_size += len(d)
+        self.current_block = (self.current_block + 1) % self.total_blocks
+        self.block_sizes[self.current_block] = block_size
+        self.block_changes += 1
 
 
-def update_mew(grad_mew, new_grads, round_val):
-    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + g) / round_val, grad_mew, new_grads)
+def update_mew(grad_mew, new_grads, round_val, sleep_weighting):
+    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + (g * sleep_weighting)) / round_val, grad_mew, new_grads)
 
 
-def update_new(grad_new, new_grads, round_val):
-    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + g**2) / round_val, grad_new, new_grads)
+def update_new(grad_new, new_grads, round_val, sleep_weighting):
+    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + (g * sleep_weighting)**2) / round_val, grad_new, new_grads)
 
 
 @jax.jit
 def tree_mean(*trees: Params) -> Params:
     """Average together a collection of pytrees"""
     return jax.tree_util.tree_map(lambda *ts: sum(ts) / len(trees), *trees)
+
+
+@jax.jit
+def tree_average(*trees: Params, weightings: Array) -> Params:
+    """Average together a collection of pytrees"""
+    return jax.tree_util.tree_map(lambda *ts: sum([t * w for t, w in zip(ts, weightings)]) / len(trees), *trees)
 
 
 @jax.jit

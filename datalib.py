@@ -8,7 +8,7 @@ import datasets
 logger = logging.getLogger(__name__)
 
 
-def lda(labels: Iterable[int], nclients: int, nclasses: int, rng: np.random.Generator, alpha: float=0.5):
+def lda(labels: Iterable[int], nclients: int, nclasses: int, rng: np.random.Generator, alpha: float=0.5) -> list[list[float]]:
     r"""
     Latent Dirichlet allocation defined in https://arxiv.org/abs/1909.06335
     default value from https://arxiv.org/abs/2002.06440
@@ -35,7 +35,7 @@ def block_lda(
     rng: np.random.Generator,
     block: Iterable[int],
     alpha: float=1.0
-):
+) -> list[list[float]]:
     r"""
     Latent Dirichlet allocation defined in https://arxiv.org/abs/1909.06335
     default value from https://arxiv.org/abs/2002.06440
@@ -77,7 +77,7 @@ class DataIter:
 
     def __len__(self) -> int:
         """Get the number of unique samples in this iterator"""
-        return len(self.ds)
+        return len(self.Y)
 
 
 class Dataset:

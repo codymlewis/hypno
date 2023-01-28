@@ -20,6 +20,7 @@ import datalib
 
 PyTree = Any
 
+
 class LeNet(nn.Module):
     @nn.compact
     def __call__(self, x: Array, representation: bool = False) -> Array:
@@ -32,6 +33,7 @@ class LeNet(nn.Module):
             return x
         x = nn.Dense(10, name="classifier")(x)
         return nn.softmax(x)
+
 
 def celoss(model: nn.Module) -> Callable[[PyTree, Array, Array], float]:
     """
@@ -71,8 +73,10 @@ def take_metric(
         Ys.append(Y)
     return metric_fn(jnp.concatenate(Ys), jnp.concatenate(preds))
 
+
 def accuracy(model, variables, ds):
     return take_metric(model, variables, ds, metrics.accuracy_score)
+
 
 def confusion_matrix(model, variables, ds):
     return take_metric(model, variables, ds, metrics.confusion_matrix)
@@ -102,8 +106,7 @@ def load_dataset(seed: int):
 
 
 if __name__ == "__main__":
-    # Fix cycling through blocks in the server
-    sns.set_theme()
+    # sns.set_theme()
     parser = ArgumentParser(description="Test the effects of catastrophic forgetting.")
     parser.add_argument('-n', '--num-clients', type=int, default=10, help="Number of clients for the simulation")
     parser.add_argument('-s', '--seed', type=int, default=42, help="Seed for the simulation")
@@ -118,7 +121,7 @@ if __name__ == "__main__":
     model = LeNet()
     params = model.init(jax.random.PRNGKey(args.seed), dataset.input_init)
     clients = [Client(params, optax.sgd(0.1), celoss(model)) for _ in range(args.num_clients)]
-    server = Server(model, params, clients, maxiter=args.rounds, seed=args.seed)
+    server = Server(model, params, clients, maxiter=args.rounds, total_blocks=args.blocks, seed=args.seed)
     state = server.init_state(params)
 
     for c in range(args.cycles):

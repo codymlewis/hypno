@@ -1,0 +1,10 @@
+numpy
+flax
+optax
+jaxopt
+einops
+datasets
+seaborn
+matplotlib
+tqdm
+scikit-learn
