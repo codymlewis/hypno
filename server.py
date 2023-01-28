@@ -11,9 +11,11 @@ from client import Client
 
 class State(NamedTuple):
     """A simple global state class"""
-    round: int
     value: float
     """The result of the function being learned"""
+    mew: list
+    new: list
+    times_updated: list[int]
 
 
 class Server:
@@ -32,9 +34,6 @@ class Server:
         self.clients = clients
         self.maxiter = maxiter
         self.rng = np.random.default_rng(seed)
-        self.grad_mew = [jax.tree_map(jnp.zeros_like, params) for _ in range(total_blocks)]
-        self.grad_new = [jax.tree_map(jnp.zeros_like, params) for _ in range(total_blocks)]
-        self.times_updated = [1 for _ in range(total_blocks)]
         self.block_sizes = np.array([0 for _ in range(total_blocks)])
         self.sleep_weighting = sleep_weighting
         self.current_block = -1
@@ -42,7 +41,12 @@ class Server:
         self.block_changes = -1
 
     def init_state(self, params: Params) -> State:
-        return State(0, np.inf)
+        return State(
+            np.inf,
+            [jax.tree_map(jnp.zeros_like, self.params) for _ in range(self.total_blocks)],
+            [jax.tree_map(jnp.zeros_like, self.params) for _ in range(self.total_blocks)],
+            times_updated = [1 for _ in range(self.total_blocks)]
+        )
 
     def update(self, params: Params, server_state: State) -> Tuple[Params, State]:
         all_grads, all_states = [], []
@@ -51,28 +55,28 @@ class Server:
             all_grads.append(grads)
             all_states.append(state)
         meaned_grads = tree_mean(*all_grads)
-        round_val = server_state.round + 1
-        self.grad_mew[self.current_block] = update_mew(
-            self.grad_mew[self.current_block],
+        grad_mew, grad_new, times_updated = server_state.mew, server_state.new, server_state.times_updated
+        grad_mew[self.current_block] = update_mew(
+            server_state.mew[self.current_block],
             meaned_grads,
-            self.times_updated[self.current_block],
+            times_updated[self.current_block],
             self.sleep_weighting
         )
-        self.grad_new[self.current_block] = update_new(
-            self.grad_new[self.current_block],
+        grad_new[self.current_block] = update_new(
+            server_state.new[self.current_block],
             meaned_grads,
-            self.times_updated[self.current_block],
+            times_updated[self.current_block],
             self.sleep_weighting
         )
-        self.times_updated[self.current_block] += 1
+        times_updated[self.current_block] += 1
         if self.block_changes:
-            meaned_grads = self.sleep(meaned_grads)
+            meaned_grads = self.sleep(meaned_grads, server_state)
         params = tree_add_scalar_mul(params, -1, meaned_grads)
-        return params, State(round_val, np.mean([s.value for s in all_states]))
+        return params, State(np.mean([s.value for s in all_states]), grad_mew, grad_new, times_updated)
 
-    def sleep(self, meaned_grads):
+    def sleep(self, meaned_grads, server_state):
         z_grads = []
-        for i, (mew, new) in enumerate(zip(self.grad_mew, self.grad_new)):
+        for i, (mew, new) in enumerate(zip(server_state.mew, server_state.new)):
             if i != self.current_block and i <= self.block_changes:
                 grads = jax.tree_map(lambda m, n: self.rng.normal(m, jnp.sqrt(n - m**2)), mew, new)
                 z_grads.append(grads)
@@ -88,12 +92,12 @@ class Server:
         self.block_changes += 1
 
 
-def update_mew(grad_mew, new_grads, round_val, sleep_weighting):
-    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + (g * sleep_weighting)) / round_val, grad_mew, new_grads)
+def update_mew(grad_mew, new_grads, times_updated, sleep_weighting):
+    return jax.tree_map(lambda m, g: ((m * (times_updated - 1)) + (g * sleep_weighting)) / times_updated, grad_mew, new_grads)
 
 
-def update_new(grad_new, new_grads, round_val, sleep_weighting):
-    return jax.tree_map(lambda m, g: ((m * (round_val - 1)) + (g * sleep_weighting)**2) / round_val, grad_new, new_grads)
+def update_new(grad_new, new_grads, times_updated, sleep_weighting):
+    return jax.tree_map(lambda m, g: ((m * (times_updated - 1)) + (g * sleep_weighting)**2) / times_updated, grad_new, new_grads)
 
 
 @jax.jit

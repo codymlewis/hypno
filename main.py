@@ -84,7 +84,7 @@ def confusion_matrix(model, variables, ds):
 
 def load_dataset(seed: int):
     """
-    Load the Fashion MNIST dataset http://arxiv.org/abs/1708.07747
+    Load the MNIST dataset
 
     Arguments:
     - seed: seed value for the rng used in the dataset
@@ -107,7 +107,7 @@ def load_dataset(seed: int):
 
 if __name__ == "__main__":
     # sns.set_theme()
-    parser = ArgumentParser(description="Test the effects of catastrophic forgetting.")
+    parser = ArgumentParser(description="Evaluate the effects of hypno against catastrophic forgetting.")
     parser.add_argument('-n', '--num-clients', type=int, default=10, help="Number of clients for the simulation")
     parser.add_argument('-s', '--seed', type=int, default=42, help="Seed for the simulation")
     parser.add_argument('-b', '--blocks', type=int, default=2, help="Number of blocks for the simulation")
