@@ -21,14 +21,12 @@ PyTree = Any
 
 class LeNet(nn.Module):
     @nn.compact
-    def __call__(self, x: Array, representation: bool = False) -> Array:
+    def __call__(self, x: Array) -> Array:
         x = einops.rearrange(x, "b w h c -> b (w h c)")
         x = nn.Dense(300)(x)
         x = nn.relu(x)
         x = nn.Dense(100)(x)
         x = nn.relu(x)
-        if representation:
-            return x
         x = nn.Dense(10, name="classifier")(x)
         return nn.softmax(x)
 
