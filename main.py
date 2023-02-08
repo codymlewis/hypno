@@ -11,8 +11,6 @@ import datasets
 from sklearn import metrics
 import numpy as np
 from tqdm import trange
-import seaborn as sns
-import matplotlib.pyplot as plt
 
 from client import Client
 from server import Server
@@ -106,7 +104,6 @@ def load_dataset(seed: int):
 
 
 if __name__ == "__main__":
-    # sns.set_theme()
     parser = ArgumentParser(description="Evaluate the effects of hypno against catastrophic forgetting.")
     parser.add_argument('-n', '--num-clients', type=int, default=10, help="Number of clients for the simulation")
     parser.add_argument('-s', '--seed', type=int, default=42, help="Seed for the simulation")
@@ -137,5 +134,3 @@ if __name__ == "__main__":
 
             test_data = dataset.get_test_iter(args.batch_size)
             print(confusion_matrix(model, params, test_data))
-            #sns.heatmap(confusion_matrix(model, params, test_data), fmt='d', annot=True, cbar=False)
-            #plt.show()
