@@ -32,4 +32,4 @@ python3 main.py -h
 
 ## Seeing a Full Explanation
 
-To see a full explanation of the code and some experiments open the `hypno.ipynb` file directly here is github (https://github.com/codymlewis/hypno/blob/main/hypno.ipynb) or locally with jupyter, note that in the latter case you will need to install jupyter from pip first.
+To see a full explanation of the code and some experiments open the `hypno.ipynb` file directly here in github (https://github.com/codymlewis/hypno/blob/main/hypno.ipynb) or locally with jupyter, note that in the latter case you will need to install jupyter from pip first.
